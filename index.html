@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Signals Web App</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.1.0/dist/chartjs-chart-financial.min.js"></script>
+<style>
+body { font-family: Arial; background: #f0f2f5; margin: 20px; }
+h1 { text-align: center; }
+#signal { text-align: center; font-size: 1.4rem; margin: 10px; }
+canvas { max-width: 900px; margin: auto; display: block; }
+select, button { padding: 5px 10px; margin: 5px; }
+</style>
+</head>
+<body>
+
+<h1>Trading Signals Web App</h1>
+
+<label for="timeframe">Select Timeframe:</label>
+<select id="timeframe">
+<option value="1">1m</option>
+<option value="5">5m</option>
+<option value="30">30m</option>
+<option value="60">1h</option>
+</select>
+
+<button onclick="manualRefresh()">Manual Refresh</button>
+
+<div id="signal">Signal: Waiting...</div>
+<canvas id="priceChart"></canvas>
+
+<script>
+// ----------------- Simulated Live Market Data -----------------
+let candles = [];
+function generateCandle(prevClose=100){
+let open = prevClose;
+let close = open + (Math.random()*4 - 2);
+let high = Math.max(open, close) + Math.random()*2;
+let low = Math.min(open, close) - Math.random()*2;
+return {o: open, h: high, l: low, c: close};
+}
+
+// Initialize 50 candles
+candles.push(generateCandle());
+for(let i=1;i<50;i++){
+candles.push(generateCandle(candles[i-1].c));
+}
+
+// ----------------- EMA & RSI -----------------
+function EMA(data, period=10){
+let k = 2/(period+1);
+let emaArray = [data[0]];
+for(let i=1;i<data.length;i++){
+emaArray.push(data[i]*k + emaArray[i-1]*(1-k));
+}
+return emaArray;
+}
+
+function RSI(data, period=14){
+let gains = [], losses = [];
+for(let i=1;i<data.length;i++){
+let change = data[i]-data[i-1];
+gains.push(change>0?change:0);
+losses.push(change<0?-change:0);
+}
+let avgGain = gains.slice(0, period).reduce((a,b)=>a+b,0)/period;
+let avgLoss = losses.slice(0, period).reduce((a,b)=>a+b,0)/period;
+let rsArray = [100 - (100/(1 + avgGain/avgLoss))];
+for(let i=period;i<gains.length;i++){
+avgGain = (avgGain*(period-1)+gains[i])/period;
+avgLoss = (avgLoss*(period-1)+losses[i])/period;
+rsArray.push(100 - (100/(1 + avgGain/avgLoss)));
+}
+return rsArray;
+}
+
+// ----------------- Chart Setup -----------------
+const ctx = document.getElementById('priceChart').getContext('2d');
+const chart = new Chart(ctx, {
+type: 'candlestick',
+data: {
+labels: candles.map((c,i)=>i+1),
+datasets: [{
+label: 'Price',
+data: candles.map(c=>({o:c.o,h:c.h,l:c.l,c:c.c}))
+}]
+},
+options: {
+responsive:true,
+plugins: { legend:{display:false} },
+scales: { x:{title:{display:true,text:'Time'}}, y:{title:{display:true,text:'Price'}} }
+}
+});
+
+// ----------------- Chart Pattern Detection -----------------
+function detectPattern(candles){
+let last = candles[candles.length-1];
+let prev = candles[candles.length-2];
+let pattern = '';
+// Simple bullish/bearish engulfing
+if(last.c>last.o && prev.c<prev.o && last.c>prev.o && last.o<prev.c) pattern='Bullish Engulfing';
+if(last.c<last.o && prev.c>prev.o && last.o>prev.c && last.c<prev.o) pattern='Bearish Engulfing';
+return pattern;
+}
+
+// ----------------- Signal Detection -----------------
+function detectSignal(candles){
+let closes = candles.map(c=>c.c);
+let emaShort = EMA(closes,5);
+let emaLong = EMA(closes,20);
+let rsi = RSI(closes,14).slice(-1)[0];
+let pattern = detectPattern(candles);
+let signal = 'Hold';
+
+// EMA crossover
+if(emaShort[emaShort.length-1] > emaLong[emaLong.length-1] && emaShort[emaShort.length-2] < emaLong[emaLong.length-2]){
+signal = 'Buy ↑';
+} else if(emaShort[emaShort.length-1] < emaLong[emaLong.length-1] && emaShort[emaShort.length-2] > emaLong[emaLong.length-2]){
+signal = 'Sell ↓';
+}
+
+// RSI confirmation
+if(rsi>70) signal+=' | Overbought';
+if(rsi<30) signal+=' | Oversold';
+
+if(pattern) signal+=' | '+pattern;
+return signal;
+}
+
+// ----------------- Update Function -----------------
+function update(){
+let newCandle = generateCandle(candles[candles.length-1].c);
+candles.push(newCandle);
+candles.shift();
+chart.data.datasets[0].data = candles.map(c=>({o:c.o,h:c.h,l:c.l,c:c.c}));
+chart.update();
+document.getElementById('signal').innerText = `Timeframe ${document.getElementById('timeframe').value}m — Signal: ${detectSignal(candles)}`;
+}
+
+// Manual Refresh
+function manualRefresh(){ update(); }
+
+// Auto-update every 2s
+setInterval(update,2000);
+update();
+
+</script>
+
+</body>
+</html>
